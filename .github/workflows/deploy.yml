@@ -1,0 +1,65 @@
+name: Deploy site preview for PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        type: string
+        description: Repo for which to deploy the preview, of the form owner/repo
+        required: true
+      branch:
+        type: string
+        required: true
+      pr_number:
+        type: string
+        required: true
+
+env:
+  # TODO parameterize
+  DOMAIN: https://ASFHyP3.github.io
+  BASE_URL: /nisar-docs-preview-clone/${{ github.event.inputs.pr_number }}
+
+permissions:
+  contents: write
+
+concurrency:
+  group:  preview-${{ github.event.inputs.pr_number }}
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    # TODO: what's this?
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: ${{ github.event.inputs.repo }}
+          ref: ${{ github.event.inputs.branch }}
+          path: src
+
+      - uses: actions/checkout@v6
+        with:
+          path: preview
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: src/environment.yml
+
+      # TODO: get $COMMIT from src repo
+      - run: |
+          cd src
+          myst build --html
+          sed -i -e "s|http://localhost:3000|$DOMAIN$BASE_URL|g" $(grep -RIl "http://localhost:3000" ./_build)
+          cd ..
+
+          rm -Rv preview/${{ github.event.inputs.pr_number }}
+          mv -v src/_build/html preview/${{ github.event.inputs.pr_number }}
+
+          cd preview
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ${{ github.event.inputs.pr_number }}
+          git commit -m "deploy preview for PR #${{ github.event.inputs.pr_number }} commit $COMMIT"
+          git push
